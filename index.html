@@ -1,0 +1,970 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Sommerfugl - NXT/Care</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <style>
+    :root {
+      /* NXT/Care Colors */
+      --sky-100: #e0f2fe;
+      /* Variant 21 Color: The selected soft purple/blue */
+      --sky-500: #8bb1e9; 
+      
+      /* Physics */
+      --spring: 0.6s cubic-bezier(0.175, 0.885, 0.32, 1.25);
+      
+      /* MASSIVE Target Sizes */
+      --btn-size: clamp(220px, 35vw, 450px);
+      /* Variant 21 Icon Scale: 1.6x the original size */
+      --icon-size: clamp(128px, 19.2vw, 256px); 
+    }
+
+    * { 
+      margin: 0; 
+      padding: 0; 
+      box-sizing: border-box; 
+      -webkit-tap-highlight-color: transparent; 
+    }
+    
+    body { 
+      margin: 0; 
+      overflow: hidden; 
+      background: #0a0a0a; 
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Rounded", "Segoe UI", Roboto, sans-serif; 
+    }
+    
+    #overlay {
+      position: absolute; 
+      top: 0; left: 0; 
+      width: 100%; height: 100%;
+      display: flex; flex-direction: column; 
+      align-items: center; justify-content: center;
+      z-index: 10; 
+      background: var(--sky-100);
+    }
+
+    /* Universal Play Icon SVG Styles */
+    .play-svg {
+      width: var(--icon-size);
+      height: var(--icon-size);
+      fill: currentColor;
+      margin-left: 10%; /* Optical centering for the play triangle */
+      transition: all var(--spring);
+    }
+
+    /* ==========================================================================
+       THE "LIQUID SKY PUDDLE" BUTTON
+       ========================================================================== */
+    .xr-btn {
+      position: relative;
+      cursor: pointer; 
+      outline: none; 
+      border: none;
+      display: flex; 
+      align-items: center; 
+      justify-content: center;
+      text-decoration: none; 
+      user-select: none;
+      transition: all var(--spring);
+      
+      /* Specific Shape & Colors */
+      width: calc(var(--btn-size) * 1.2); 
+      height: calc(var(--btn-size) * 1.1);
+      border-radius: 60% 40% 40% 60% / 50% 60% 40% 50%;
+      background: var(--sky-100); 
+      color: var(--sky-500);
+      box-shadow: inset 15px 15px 30px #b9ddf5, inset -15px -15px 30px #ffffff;
+    }
+    
+    .xr-btn:hover { 
+      border-radius: 50%; 
+      transform: scale(1.05); 
+      background: var(--sky-500); 
+      color: var(--sky-100); 
+      box-shadow: 15px 15px 30px #b9ddf5, -15px -15px 30px #ffffff; 
+    }
+
+    .xr-btn:active {
+      transform: scale(0.95);
+    }
+
+    #toast {
+      position: fixed;
+      bottom: -100px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: var(--sky-500);
+      color: white;
+      padding: 16px 32px;
+      border-radius: 50px;
+      font-weight: 600;
+      font-size: 1.1rem;
+      box-shadow: 0 10px 25px rgba(139, 177, 233, 0.4);
+      transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.25);
+      z-index: 1000;
+      pointer-events: none;
+    }
+    
+    #toast.show {
+      bottom: 60px;
+    }
+
+    /* AR Elements */
+    .exit-ar {
+      position: fixed; top: 20px; right: 20px; 
+      background: rgba(255,255,255,.25);
+      color: #fff; border: none; border-radius: 50%; 
+      width: 50px; height: 50px;
+      font-size: 24px; cursor: pointer; backdrop-filter: blur(5px); 
+      z-index: 1000;
+      display: none; align-items: center; justify-content: center;
+    }
+    .xr-active .exit-ar { display: flex; }
+    .webxr-hidden { display: none !important; }
+  </style>
+  <script type="importmap">
+    {"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.150.1/build/three.module.js"}}
+  </script>
+</head>
+<body>
+  
+  <div id="overlay">
+    <!-- SVG Defs for Launcher -->
+    <svg width="0" height="0" style="position:absolute;">
+      <defs>
+        <g id="icon-play">
+          <path d="M8 5v14l11-7z" stroke-linejoin="round" stroke-linecap="round"/>
+        </g>
+      </defs>
+    </svg>
+
+    <!-- Variant 21 Launch Button -->
+    <button class="xr-btn" id="launch-button" aria-label="Start XR Experience">
+      <svg class="play-svg" viewBox="0 0 24 24">
+        <use href="#icon-play"></use>
+      </svg>
+    </button>
+  </div>
+  
+  <!-- Toast is left outside overlay so it shows through the AR DOM Overlay briefly -->
+  <div id="toast">XR Experience Launched!</div>
+
+  <button class="exit-ar" id="exit-ar">×</button>
+
+<script type="module">
+import * as THREE from 'three';
+
+// ─── BUTTERFLY SPECIES CONFIG (Filtered for Hospital App) ────────────────────
+const BUTTERFLY_MODELS = [
+  { id:1,  name:"Monarch (Classic)",  shape:"monarch",    colors:['#ff8800','#dd4400','#000000'], veinColor:'#000000', opacity:1.0,  emissive:0.1 },
+  { id:2,  name:"Blue Morpho",        shape:"rounded",    colors:['#00aaff','#0044ff','#000033'], veinColor:'#000022', opacity:1.0,  emissive:0.4 },
+  { id:6,  name:"Sunset Fairy",       shape:"swallowtail",colors:['#ff0077','#ffaa00','#440022'], veinColor:'#ffdd00', opacity:0.85, emissive:0.6 },
+  { id:7,  name:"Peacock Red",        shape:"rounded",    colors:['#aa2200','#ff4400','#220000'], veinColor:'#110000', opacity:1.0,  emissive:0.2 },
+  { id:8,  name:"Starry Night",       shape:"rounded",    colors:['#000044','#330088','#000000'], veinColor:'#8888ff', opacity:0.9,  emissive:0.5 },
+  { id:10, name:"Pink Orchid",        shape:"swallowtail",colors:['#ffbbee','#ff77cc','#550033'], veinColor:'#ffffff', opacity:0.75, emissive:0.5 }
+];
+
+// ─── STATE & CONFIG ────────────────────────────────────────────────────────────
+const state = {
+  xrSession:null, isPlaying:false, isControllerSelection:false,
+  clock:new THREE.Clock(), gameStartTime:0,
+  selectedCtrlIdx:0, ctrlHoldStart:{}, activeController:null, ctrlPressStart:0
+};
+// NXT/Care v1.3 — Controller Select timings (Section 1)
+const CONSTANTS = { selectTime:4000, holdTime:3000 };
+const CONFIG = {
+  PHYSICS:{ stiffness:1.2, damping:1.5, maxSpeed:0.8 },
+  GAME:{ spawnBoxLateral:0.25, spawnBoxZMin:0.05, spawnBoxZMax:0.18, minFlowerDistance:0.12, maxFlowers:5, spawnInterval:2.0 }
+};
+
+let camera, scene, renderer, backgroundAudio;
+let controllers = [];
+let butterfly, gardenSystem, particleSystem;
+let clapHUD;
+
+// NXT/Care v1.3 — Clap-to-Close state (Section 2)
+let clapStart = 0;
+const CLAP_DIST = 0.15; // 15 cm distance trigger
+const CLAP_TIME = 6000; // 6 seconds duration
+
+// ─── INIT ─────────────────────────────────────────────────────────────────────
+function init() {
+  scene  = new THREE.Scene();
+  camera = new THREE.PerspectiveCamera(70, innerWidth/innerHeight, 0.01, 20);
+
+  renderer = new THREE.WebGLRenderer({ antialias:true, alpha:true, powerPreference:'high-performance' });
+  renderer.setPixelRatio(devicePixelRatio);
+  renderer.setSize(innerWidth, innerHeight);
+  renderer.setClearColor(0x000000, 0); // NXT/Care v1.3 — transparent for AR passthrough
+  renderer.xr.enabled = true;
+  document.body.appendChild(renderer.domElement);
+
+  // NXT/Care v1.3 AR Lighting Baseline (Section 4)
+  scene.add(new THREE.AmbientLight(0xffffff, 1.6));
+  const keyLight = new THREE.DirectionalLight(0xffffff, 1.2);
+  keyLight.position.set(1, 4, 2);
+  scene.add(keyLight);
+  const rimLight = new THREE.DirectionalLight(0x88aaff, 0.5); // NXT/Care blue rim
+  rimLight.position.set(-2, 1, -1);
+  scene.add(rimLight);
+
+  particleSystem = new ParticleSystem();
+  
+  // Set up the new UI Launcher Logic
+  const launchBtn = document.getElementById('launch-button');
+  const toast = document.getElementById('toast');
+  let isLaunching = false;
+  let toastTimeout;
+
+  launchBtn.addEventListener('click', () => {
+    if (isLaunching) return; // Prevent double-clicks
+    isLaunching = true;
+    
+    toast.classList.add('show');
+    
+    // Reset toast after delay
+    clearTimeout(toastTimeout);
+    toastTimeout = setTimeout(() => {
+      toast.classList.remove('show');
+      isLaunching = false;
+    }, 2000);
+    
+    // Trigger XR
+    startAR();
+  });
+
+  document.getElementById('exit-ar').addEventListener('click', endAR);
+  window.addEventListener('resize', onResize);
+}
+
+// ─── WING GEOMETRY ─────────────────────────────────────────────────────────────
+function createWingGeometries(type) {
+  const fw = new THREE.Shape(), hw = new THREE.Shape();
+
+  if (type === 'monarch') {
+    fw.moveTo(0, 0.09);
+    fw.lineTo(0, -0.03);
+    fw.bezierCurveTo( 0.05,-0.055,  0.13,-0.055,  0.19,-0.01);
+    fw.bezierCurveTo( 0.215, 0.02,  0.215, 0.07,  0.18, 0.105);
+    fw.bezierCurveTo( 0.12,  0.135, 0.04,  0.13,  0, 0.09);
+
+    hw.moveTo(0, 0.06);
+    hw.bezierCurveTo(0.05, 0.03, 0.13, 0.055, 0.165, 0.105);
+    hw.bezierCurveTo(0.185,0.145, 0.175, 0.225, 0.10,  0.26);
+    hw.bezierCurveTo(0.04, 0.285,-0.01,  0.235,-0.01,  0.15);
+    hw.quadraticCurveTo(-0.01, 0.09, 0, 0.06);
+
+  } else if (type === 'swallowtail') {
+    fw.moveTo(0, 0.095);
+    fw.lineTo(0, -0.04);
+    fw.bezierCurveTo(0.06,-0.07, 0.15,-0.065, 0.22,-0.01);
+    fw.bezierCurveTo(0.25, 0.02, 0.245, 0.08, 0.21, 0.12);
+    fw.bezierCurveTo(0.135,0.15, 0.05,  0.14, 0, 0.095);
+
+    hw.moveTo(0, 0.065);
+    hw.bezierCurveTo(0.06, 0.035, 0.145,0.065, 0.185,0.12);
+    hw.bezierCurveTo(0.205,0.165, 0.175, 0.24, 0.095, 0.27);
+    hw.bezierCurveTo(0.065,0.29,  0.05,  0.345, 0.04, 0.415);
+    hw.bezierCurveTo(0.02, 0.345,-0.02,  0.275,-0.02, 0.195);
+    hw.bezierCurveTo(-0.02,0.115,-0.01, 0.075, 0, 0.065);
+
+  } else if (type === 'rounded') {
+    fw.moveTo(0, 0.095);
+    fw.lineTo(0, -0.02);
+    fw.bezierCurveTo(0.05,-0.045, 0.125,-0.045, 0.185,-0.01);
+    fw.bezierCurveTo(0.225, 0.03, 0.225, 0.095, 0.185, 0.13);
+    fw.bezierCurveTo(0.115, 0.16, 0.04,  0.15, 0, 0.095);
+
+    hw.moveTo(0, 0.065);
+    hw.bezierCurveTo(0.065,0.04, 0.155,0.075, 0.19, 0.135);
+    hw.bezierCurveTo(0.21, 0.18, 0.20,  0.265, 0.115, 0.295);
+    hw.bezierCurveTo(0.04, 0.315,-0.01, 0.255,-0.01,  0.165);
+    hw.quadraticCurveTo(-0.01, 0.095, 0, 0.065);
+
+  } else if (type === 'moth') {
+    fw.moveTo(0, 0.085);
+    fw.lineTo(0, -0.01);
+    fw.bezierCurveTo(0.08,-0.03, 0.185,-0.02, 0.235, 0.02);
+    fw.bezierCurveTo(0.265,0.055, 0.255, 0.105, 0.205, 0.135);
+    fw.bezierCurveTo(0.125,0.16, 0.04,  0.14, 0, 0.085);
+
+    hw.moveTo(0, 0.065);
+    hw.bezierCurveTo(0.075,0.04, 0.175,0.075, 0.21, 0.145);
+    hw.bezierCurveTo(0.23, 0.195, 0.195,0.29,  0.095, 0.335);
+    hw.bezierCurveTo(0.06, 0.355, 0.04, 0.42,  0.03, 0.51);
+    hw.bezierCurveTo(0.01, 0.42, -0.02, 0.325,-0.02, 0.235);
+    hw.bezierCurveTo(-0.02,0.135,-0.01, 0.075, 0, 0.065);
+
+  } else {
+    fw.moveTo(0, 0.085);
+    fw.lineTo(0, -0.03);
+    fw.lineTo(0.215,-0.03);
+    fw.lineTo(0.245, 0.03);
+    fw.lineTo(0.185, 0.115);
+    fw.bezierCurveTo(0.105,0.14, 0.03, 0.13, 0, 0.085);
+
+    hw.moveTo(0, 0.065);
+    hw.lineTo(0.175, 0.055);
+    hw.lineTo(0.205, 0.145);
+    hw.bezierCurveTo(0.19, 0.21, 0.135,0.255, 0.07, 0.275);
+    hw.bezierCurveTo(0.02, 0.255,-0.01, 0.195,-0.01, 0.115);
+    hw.lineTo(0, 0.065);
+  }
+
+  const fwG = new THREE.ShapeGeometry(fw, 32);
+  const hwG = new THREE.ShapeGeometry(hw, 32);
+  fwG.rotateX(Math.PI / 2);
+  hwG.rotateX(Math.PI / 2);
+  return { fwGeom: fwG, hwGeom: hwG };
+}
+
+// ─── WING TEXTURE ──────────────────────────────────────────────────────────────
+function createWingTexture(cfg, isFore) {
+  const S = 512;
+  const cv = document.createElement('canvas');
+  cv.width = cv.height = S;
+  const g = cv.getContext('2d');
+
+  const bg = g.createRadialGradient(S*0.28, S*0.52, 0, S*0.55, S*0.48, S*0.85);
+  bg.addColorStop(0,   cfg.colors[0]);
+  bg.addColorStop(0.5, cfg.colors[1]);
+  bg.addColorStop(1,   cfg.colors[2]);
+  g.fillStyle = bg;
+  g.fillRect(0, 0, S, S);
+
+  if (cfg.emissive >= 0.5 || cfg.opacity < 0.5) {
+    const glow = g.createRadialGradient(S*0.3, S*0.5, 0, S*0.3, S*0.5, S*0.45);
+    glow.addColorStop(0, 'rgba(255,255,255,0.28)');
+    glow.addColorStop(1, 'rgba(255,255,255,0)');
+    g.fillStyle = glow; g.fillRect(0, 0, S, S);
+  }
+
+  const [ox, oy] = isFore ? [5, 355] : [28, 505];
+
+  const vFore = [
+    [S*0.93, S*0.72],[S*0.91, S*0.51],[S*0.89, S*0.32],
+    [S*0.78, S*0.13],[S*0.52, S*0.04],[S*0.24, S*0.04]
+  ];
+  const vHind = [
+    [S*0.91, S*0.88],[S*0.94, S*0.64],[S*0.90, S*0.42],
+    [S*0.77, S*0.23],[S*0.52, S*0.11],[S*0.24, S*0.11]
+  ];
+  const veins = isFore ? vFore : vHind;
+
+  g.lineCap = 'round';
+  g.strokeStyle = cfg.veinColor;
+
+  veins.forEach(([tx, ty], i) => {
+    const cpx = ox + (tx-ox)*0.48 + (i*37%52) - 20;
+    const cpy = oy + (ty-oy)*0.48 + (i*23%46) - 22;
+
+    g.lineWidth = Math.max(1.1, 3.0 - i*0.32);
+    g.globalAlpha = 0.58 - i*0.05;
+    g.beginPath(); g.moveTo(ox, oy);
+    g.quadraticCurveTo(cpx, cpy, tx, ty); g.stroke();
+
+    if (i < veins.length-1) {
+      g.lineWidth = 1.0; g.globalAlpha = 0.32;
+      g.beginPath(); g.moveTo(cpx, cpy);
+      g.lineTo(cpx + (i*43%84)-42, cpy + (i*19%62)-31); g.stroke();
+    }
+  });
+  g.globalAlpha = 1;
+
+  const bdg = g.createRadialGradient(S*0.33, S*0.5, S*0.23, S*0.5, S*0.5, S*0.77);
+  bdg.addColorStop(0.0, 'rgba(0,0,0,0)');
+  bdg.addColorStop(0.66,'rgba(0,0,0,0)');
+  bdg.addColorStop(1.0, 'rgba(0,0,0,0.68)');
+  g.fillStyle = bdg; g.fillRect(0, 0, S, S);
+
+  if (cfg.veinColor === '#000000') {
+    g.fillStyle = 'rgba(255,255,255,0.9)';
+    for (let i = 0; i < 9; i++) {
+      const a   = (i/9)*Math.PI*1.5 - 0.25;
+      const r   = S*0.69;
+      const sx  = S*0.5 + Math.cos(a)*r;
+      const sy  = S*0.5 + Math.sin(a)*r;
+      if (sx > S*0.38 && sx < S-6 && sy > 6 && sy < S-6) {
+        g.beginPath(); g.ellipse(sx, sy, 5.5, 4, a, 0, Math.PI*2); g.fill();
+      }
+    }
+  }
+
+  if (cfg.emissive >= 0.4) {
+    g.globalAlpha = 0.24;
+    const sh = g.createLinearGradient(0, S, S, 0);
+    sh.addColorStop(0,    'rgba(180,215,255,0)');
+    sh.addColorStop(0.38, 'rgba(210,235,255,1)');
+    sh.addColorStop(0.62, 'rgba(255,255,255,1)');
+    sh.addColorStop(1,    'rgba(180,215,255,0)');
+    g.fillStyle = sh; g.fillRect(0, 0, S, S);
+    g.globalAlpha = 1;
+  }
+
+  if (cfg.name === 'Starry Night') {
+    g.fillStyle = 'rgba(255,255,255,0.88)';
+    for (let i = 0; i < 60; i++) {
+      g.beginPath();
+      g.arc((i*97%S), (i*137%S), (i*53%26)*0.1+0.7, 0, Math.PI*2);
+      g.fill();
+    }
+  }
+
+  return new THREE.CanvasTexture(cv);
+}
+
+// ─── MAGICAL BUTTERFLY ─────────────────────────────────────────────────────────
+class MagicalButterfly {
+  constructor() {
+    this.mesh   = new THREE.Group();
+    this.position = new THREE.Vector3(0, 1.2, -0.5);
+    this.velocity = new THREE.Vector3();
+    this.mesh.position.copy(this.position);
+
+    // Scale down to 50% for pediatric use case
+    this.mesh.scale.set(0.5, 0.5, 0.5);
+
+    this._buildBody();
+
+    this.wingLGroup = new THREE.Group();
+    this.wingRGroup = new THREE.Group();
+    this.mesh.add(this.wingLGroup, this.wingRGroup);
+    scene.add(this.mesh);
+
+    this.modelsData = [];
+
+    BUTTERFLY_MODELS.forEach(cfg => {
+      const { fwGeom, hwGeom } = createWingGeometries(cfg.shape);
+      const fwTex = createWingTexture(cfg, true);
+      const hwTex = createWingTexture(cfg, false);
+
+      const mkMat = tex => new THREE.MeshBasicMaterial({
+        map: tex, transparent: true, opacity: cfg.opacity,
+        side: THREE.DoubleSide, depthWrite: false
+      });
+
+      const fwL = new THREE.Mesh(fwGeom, mkMat(fwTex));
+      const hwL = new THREE.Mesh(hwGeom, mkMat(hwTex));
+      hwL.position.z = 0.003;
+
+      const fwR = new THREE.Mesh(fwGeom, mkMat(fwTex));
+      const hwR = new THREE.Mesh(hwGeom, mkMat(hwTex));
+      fwR.scale.x = -1; hwR.scale.x = -1;
+      hwR.position.z = 0.003;
+
+      this.modelsData.push({ fwL, hwL, fwR, hwR, cfg });
+    });
+
+    // Random selection on load
+    this.currentModelIdx = Math.floor(Math.random() * this.modelsData.length);
+    this.applyModel(this.currentModelIdx);
+
+    this.state        = 'FOLLOW_HAND';
+    this.targetFlower = null;
+    this.drinkTimer   = 0;
+    this.time         = 0;
+    this.particleTimer= 0;
+    this._tv = new THREE.Vector3();
+    this._tm = new THREE.Matrix4();
+    this._tq = new THREE.Quaternion();
+  }
+
+  _buildBody() {
+    this.bodyGroup = new THREE.Group();
+
+    const darkMat = new THREE.MeshPhongMaterial({ color:0x0a0705, shininess:50 });
+    const bandMat = new THREE.MeshPhongMaterial({ color:0x1f1208, shininess:20 });
+
+    [0.0055, 0.005, 0.0047, 0.0040, 0.003].forEach((r, i) => {
+      const seg = new THREE.Mesh(new THREE.SphereGeometry(r, 8, 6), i%2 ? bandMat : darkMat);
+      seg.position.z = 0.006 + i*0.009;
+      seg.scale.set(0.88, 0.88, 1.3);
+      this.bodyGroup.add(seg);
+    });
+
+    const thorax = new THREE.Mesh(new THREE.SphereGeometry(0.008, 8, 8), darkMat);
+    thorax.scale.set(0.84, 1.0, 1.25);
+    this.bodyGroup.add(thorax);
+
+    const head = new THREE.Mesh(new THREE.SphereGeometry(0.006, 8, 8), darkMat);
+    head.position.z = -0.014;
+    this.bodyGroup.add(head);
+
+    const eyeMat = new THREE.MeshBasicMaterial({ color:0x553311 });
+    [-0.004, 0.004].forEach(ex => {
+      const eye = new THREE.Mesh(new THREE.SphereGeometry(0.0018, 6, 6), eyeMat);
+      eye.position.set(ex, 0.003, -0.016);
+      this.bodyGroup.add(eye);
+    });
+
+    const antLineMat = new THREE.LineBasicMaterial({ color:0x2a1a10 });
+    const clubMat    = new THREE.MeshBasicMaterial({ color:0x2a1a10 });
+    [-1, 1].forEach(s => {
+      const pts = [
+        new THREE.Vector3(s*0.003,  0.002, -0.014),
+        new THREE.Vector3(s*0.009,  0.010, -0.022),
+        new THREE.Vector3(s*0.012,  0.014, -0.029)
+      ];
+      this.bodyGroup.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), antLineMat));
+      const club = new THREE.Mesh(new THREE.SphereGeometry(0.002, 6, 6), clubMat);
+      club.position.set(s*0.012, 0.014, -0.029);
+      this.bodyGroup.add(club);
+    });
+
+    this.mesh.add(this.bodyGroup);
+  }
+
+  applyModel(idx) {
+    this.wingLGroup.clear(); this.wingRGroup.clear();
+    const m = this.modelsData[idx];
+    this.wingLGroup.add(m.fwL, m.hwL);
+    this.wingRGroup.add(m.fwR, m.hwR);
+    particleSystem.burst(this.position, 0xffffff, 30, 2.0);
+  }
+
+  update(delta, handPos) {
+    this.time          += delta;
+    this.particleTimer += delta;
+
+    let targetPos = this._tv.copy(handPos);
+    targetPos.y  += 0.15;
+    let isDrinking = false;
+
+    if (this.state === 'FLY_TO_FLOWER' && this.targetFlower) {
+      targetPos.copy(this.targetFlower.mesh.position);
+      targetPos.y += 0.06;
+      if (this.position.distanceTo(targetPos) < 0.04) { this.state = 'DRINKING'; this.drinkTimer = 2.0; }
+    } else if (this.state === 'DRINKING') {
+      targetPos.copy(this.targetFlower.mesh.position);
+      targetPos.y += 0.035;
+      isDrinking = true;
+      this.drinkTimer -= delta;
+      if (this.drinkTimer <= 0) {
+        particleSystem.burst(this.targetFlower.mesh.position, this.targetFlower.color, 50, 3.0);
+        gardenSystem.removeFlower(this.targetFlower);
+        this.targetFlower = null;
+        this.state = 'RETURN';
+      }
+    } else if (this.state === 'RETURN') {
+      if (this.position.distanceTo(targetPos) < 0.1) this.state = 'FOLLOW_HAND';
+    }
+
+    if (!isDrinking) {
+      targetPos.y += Math.sin(this.time * 2.0) * 0.03;
+      targetPos.x += Math.cos(this.time * 1.5) * 0.02;
+    }
+
+    const spring = targetPos.clone().sub(this.position).multiplyScalar(CONFIG.PHYSICS.stiffness);
+    const damp   = this.velocity.clone().multiplyScalar(CONFIG.PHYSICS.damping);
+    this.velocity.add(spring.sub(damp).multiplyScalar(delta));
+    this.velocity.clampLength(0, CONFIG.PHYSICS.maxSpeed);
+    this.position.addScaledVector(this.velocity, delta);
+    this.mesh.position.copy(this.position);
+
+    if (this.velocity.lengthSq() > 0.001 && !isDrinking) {
+      this._tm.lookAt(this.position, this.position.clone().add(this.velocity), new THREE.Vector3(0,1,0));
+      this._tq.setFromRotationMatrix(this._tm);
+      this.mesh.quaternion.slerp(this._tq, 0.08);
+      const sr = this.velocity.length() / CONFIG.PHYSICS.maxSpeed;
+      this.bodyGroup.rotation.x = THREE.MathUtils.lerp(this.bodyGroup.rotation.x, -0.35*sr, 0.1);
+    } else {
+      this.bodyGroup.rotation.x = THREE.MathUtils.lerp(this.bodyGroup.rotation.x, 0, 0.1);
+    }
+
+    const shape     = this.modelsData[this.currentModelIdx].cfg.shape;
+    const flapSpeed = shape === 'moth' ? 10 : shape === 'monarch' ? 14 : 17;
+
+    if (isDrinking) {
+      const fold = Math.sin(this.time * 3.5) * 0.22 + 0.52;
+      this.wingLGroup.rotation.z =  fold;
+      this.wingRGroup.rotation.z = -fold;
+      this.wingLGroup.rotation.y = 0;
+      this.wingRGroup.rotation.y = 0;
+    } else {
+      const phase = Math.sin(this.time * flapSpeed);
+      const flap  = phase * 0.82;
+      const sweep = phase * 0.13;
+      this.wingLGroup.rotation.z =  flap;
+      this.wingLGroup.rotation.y =  sweep;
+      this.wingRGroup.rotation.z = -flap;
+      this.wingRGroup.rotation.y = -sweep;
+    }
+
+    if (this.velocity.length() > 0.05 && this.particleTimer > 0.08 && !isDrinking) {
+      this.particleTimer = 0;
+      particleSystem.spawn(this.position.clone(), 0xffffff, 1, 0.2);
+    }
+  }
+
+  commandToFlower(flower) {
+    if (this.state === 'FOLLOW_HAND' || this.state === 'RETURN') {
+      this.targetFlower = flower;
+      flower.isTargeted = true;
+      this.state = 'FLY_TO_FLOWER';
+      flower.mesh.scale.setScalar(1.4);
+      flower.mesh.children[0].material.emissiveIntensity = 0.8;
+    }
+  }
+}
+
+// ─── GARDEN SYSTEM ────────────────────────────────────────────────────────────
+class GardenSystem {
+  constructor() {
+    this.flowers    = [];
+    this.spawnTimer = 0;
+    this.stemMat    = new THREE.MeshStandardMaterial({ color:0x4caf50, roughness:0.8 });
+    this.centerMat  = new THREE.MeshStandardMaterial({ color:0xffeb3b, emissive:0xffd54f, emissiveIntensity:0.4 });
+    this.colors     = [0xFF6B6B,0x4ECDC4,0x9D50BB,0xFFE66D,0xFF8BEA];
+  }
+
+  generateFlowerMesh(_, colorHex) {
+    const group   = new THREE.Group();
+    const petalMat= new THREE.MeshStandardMaterial({ color:colorHex, roughness:0.3, side:THREE.DoubleSide, emissive:colorHex, emissiveIntensity:0.2 });
+    const stem    = new THREE.Mesh(new THREE.CylinderGeometry(0.002,0.003,0.08), this.stemMat);
+    stem.position.y = -0.04; group.add(stem);
+    const center  = new THREE.Mesh(new THREE.SphereGeometry(0.012), this.centerMat.clone());
+    group.add(center);
+    const petalG  = new THREE.SphereGeometry(0.015,16,8);
+    petalG.scale(1,0.2,2.5);
+    for (let i=0; i<5; i++) {
+      const a = (i/5)*Math.PI*2;
+      const p = new THREE.Mesh(petalG, petalMat);
+      p.position.set(Math.cos(a)*0.015, 0, Math.sin(a)*0.015);
+      p.rotation.y = -a; p.rotation.x = 0.2; group.add(p);
+    }
+    group.scale.setScalar(0.001);
+    return group;
+  }
+
+  update(delta, handPos) {
+    this.spawnTimer += delta;
+    if (this.spawnTimer > CONFIG.GAME.spawnInterval && this.flowers.length < CONFIG.GAME.maxFlowers && handPos.lengthSq() > 0) {
+      this.spawnTimer = 0; this.trySpawnFlower(handPos);
+    }
+    this.flowers.forEach(f => {
+      if (f.animTime < 1.0) {
+        f.animTime += delta*1.5;
+        const t  = f.animTime;
+        const sc = Math.sin(-13*(t+1)*Math.PI/2)*Math.pow(2,-10*t)+1;
+        f.mesh.scale.setScalar(Math.max(0.001, sc*(f.isTargeted?1.4:1.0)));
+      }
+      const et = state.clock.getElapsedTime();
+      f.mesh.rotation.z = Math.sin(et*0.8+f.id)*0.08;
+      f.mesh.rotation.x = Math.cos(et*0.7+f.id)*0.06;
+    });
+  }
+
+  trySpawnFlower(handPos) {
+    let cand = new THREE.Vector3(), valid = false;
+    for (let i=0; i<10; i++) {
+      cand.copy(handPos);
+      cand.x += (Math.random()-0.5)*CONFIG.GAME.spawnBoxLateral;
+      cand.y += (Math.random()-0.5)*CONFIG.GAME.spawnBoxLateral;
+      const fwd = new THREE.Vector3(0,0,-1).applyQuaternion(state.activeController.quaternion);
+      cand.add(fwd.multiplyScalar(CONFIG.GAME.spawnBoxZMin+Math.random()*(CONFIG.GAME.spawnBoxZMax-CONFIG.GAME.spawnBoxZMin)));
+      if (this.flowers.every(f => cand.distanceTo(f.mesh.position) >= CONFIG.GAME.minFlowerDistance)) { valid=true; break; }
+    }
+    if (valid) {
+      const color = this.colors[Math.floor(Math.random()*this.colors.length)];
+      const mesh  = this.generateFlowerMesh(0, color);
+      mesh.position.copy(cand);
+      scene.add(mesh);
+      this.flowers.push({ id:Math.random(), mesh, color, animTime:0, isTargeted:false });
+      particleSystem.burst(mesh.position, color, 15, 1.0);
+    }
+  }
+
+  removeFlower(fd) { scene.remove(fd.mesh); this.flowers = this.flowers.filter(f=>f!==fd); }
+
+  checkHandCollisions(handPos, bfly) {
+    this.flowers.forEach(f => {
+      if (!f.isTargeted && handPos.distanceTo(f.mesh.position) < 0.12) {
+        bfly.commandToFlower(f);
+        particleSystem.burst(f.mesh.position, 0xFFFFFF, 8, 0.5);
+      }
+    });
+  }
+}
+
+// ─── PARTICLE SYSTEM ──────────────────────────────────────────────────────────
+class ParticleSystem {
+  constructor() {
+    const max = 600;
+    const cv  = document.createElement('canvas'); cv.width = cv.height = 32;
+    const c   = cv.getContext('2d');
+    const gr  = c.createRadialGradient(16,16,0,16,16,16);
+    gr.addColorStop(0,'rgba(255,255,255,1)'); gr.addColorStop(0.3,'rgba(255,255,255,0.8)'); gr.addColorStop(1,'rgba(255,255,255,0)');
+    c.fillStyle = gr; c.fillRect(0,0,32,32);
+
+    this.mesh = new THREE.InstancedMesh(
+      new THREE.PlaneGeometry(0.015,0.015),
+      new THREE.MeshBasicMaterial({ map:new THREE.CanvasTexture(cv), transparent:true, blending:THREE.AdditiveBlending, depthWrite:false }),
+      max
+    );
+    this.mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    scene.add(this.mesh);
+
+    this.particles = Array.from({length:max}, ()=>({ active:false, pos:new THREE.Vector3(), vel:new THREE.Vector3(), life:0, color:new THREE.Color() }));
+    this.dummy = new THREE.Object3D();
+  }
+
+  spawn(position, colorHex, count=1, speed=1.0) {
+    let n=0;
+    for (let i=0; i<this.particles.length && n<count; i++) {
+      const p = this.particles[i];
+      if (!p.active) {
+        p.active=true; p.pos.copy(position);
+        const th=Math.random()*Math.PI*2, ph=Math.acos(Math.random()*2-1);
+        const sp=(Math.random()*0.3+0.2)*speed;
+        p.vel.set(Math.sin(ph)*Math.cos(th),Math.sin(ph)*Math.sin(th),Math.cos(ph)).multiplyScalar(sp);
+        p.life=1.0; p.color.setHex(colorHex); n++;
+      }
+    }
+  }
+
+  burst(pos, colorHex, count, speed=2.0) { this.spawn(pos, colorHex, count, speed); }
+
+  update(delta, cam) {
+    for (let i=0; i<this.particles.length; i++) {
+      const p = this.particles[i];
+      if (!p.active) continue;
+      p.life -= delta*1.2;
+      if (p.life <= 0) {
+        p.active=false; this.dummy.position.set(999,999,999); this.dummy.updateMatrix(); this.mesh.setMatrixAt(i,this.dummy.matrix);
+      } else {
+        p.pos.add(p.vel.clone().multiplyScalar(delta));
+        p.vel.y -= delta*0.1; p.vel.multiplyScalar(0.95);
+        this.dummy.position.copy(p.pos); this.dummy.quaternion.copy(cam.quaternion);
+        this.dummy.scale.setScalar(p.life*1.5); this.dummy.updateMatrix();
+        this.mesh.setMatrixAt(i,this.dummy.matrix); this.mesh.setColorAt(i,p.color);
+      }
+    }
+    this.mesh.instanceMatrix.needsUpdate=true;
+    if (this.mesh.instanceColor) this.mesh.instanceColor.needsUpdate=true;
+  }
+}
+
+// ─── NXT/Care v1.3 — White-Glass Clap HUD (Section 3) ────────────────────────
+function roundRect(ctx, x, y, w, h, r) {
+  const rr = Math.min(r, w/2, h/2);
+  ctx.beginPath();
+  ctx.moveTo(x+rr, y);
+  ctx.arcTo(x+w, y,   x+w, y+h, rr);
+  ctx.arcTo(x+w, y+h, x,   y+h, rr);
+  ctx.arcTo(x,   y+h, x,   y,   rr);
+  ctx.arcTo(x,   y,   x+w, y,   rr);
+  ctx.closePath();
+}
+
+function buildClapHUD() {
+  const hud = new THREE.Group();
+  // Head-locked: attach to camera, slightly above eye-line and forward
+  hud.position.set(0, 0.25, -1.4);
+
+  const c   = document.createElement('canvas');
+  c.width   = 1024; c.height = 220;
+  const tex = new THREE.CanvasTexture(c);
+
+  const mesh = new THREE.Mesh(
+    new THREE.PlaneGeometry(0.9, 0.193),
+    new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthTest:false, depthWrite:false })
+  );
+  mesh.renderOrder = 999;
+  hud.add(mesh);
+  hud.userData = { canvas: c, ctx: c.getContext('2d'), tex };
+  hud.visible = false;
+  return hud;
+}
+
+function drawClapHUD(hud) {
+  hud.visible = clapStart > 0;
+  if (!hud.visible) return;
+
+  const { canvas, ctx, tex } = hud.userData;
+  const W = 1024, H = 220, R = 110; // full-pill, like .menu-bar
+  ctx.clearRect(0, 0, W, H);
+
+  // 1. Soft sky-blue elevation shadow
+  ctx.shadowColor   = 'rgba(14,165,233,0.22)';
+  ctx.shadowBlur    = 28;
+  ctx.shadowOffsetY = 10;
+
+  // 2. White glass card
+  ctx.fillStyle = 'rgba(255,255,255,0.92)';
+  roundRect(ctx, 12, 8, W - 24, H - 24, R); ctx.fill();
+
+  // reset shadow before strokes/text
+  ctx.shadowColor   = 'transparent';
+  ctx.shadowBlur    = 0;
+  ctx.shadowOffsetY = 0;
+
+  // 3. Inner highlight border
+  ctx.strokeStyle = 'rgba(255,255,255,0.9)';
+  ctx.lineWidth   = 2;
+  roundRect(ctx, 13, 9, W - 26, H - 26, R - 1); ctx.stroke();
+
+  const elapsed = Date.now() - clapStart;
+  const prog    = Math.min(1, elapsed / CLAP_TIME);
+  const remain  = Math.max(0, Math.ceil((CLAP_TIME - elapsed) / 1000));
+
+  // 4. Text — dark slate, full-width, no shadow
+  ctx.fillStyle    = '#0f172a';
+  ctx.font         = '800 52px -apple-system, "SF Pro Rounded", "Segoe UI", Helvetica, sans-serif';
+  ctx.textAlign    = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(`👏 Hold sammen i ${remain}s for at lukke`, W / 2, 78);
+
+  // 5. Bar track — accent-light wash
+  const bx = 64, by = 142, bw = W - 128, bh = 36, br = 18;
+  ctx.fillStyle = 'rgba(14,165,233,0.12)';
+  roundRect(ctx, bx, by, bw, bh, br); ctx.fill();
+
+  // 6. Bar fill — sky-blue gradient
+  if (prog > 0) {
+    const grad = ctx.createLinearGradient(bx, 0, bx + bw, 0);
+    grad.addColorStop(0, '#bae6fd'); grad.addColorStop(1, '#0ea5e9');
+    ctx.fillStyle = grad;
+    roundRect(ctx, bx, by, Math.max(br * 2, Math.round(bw * prog)), bh, br); ctx.fill();
+  }
+
+  tex.needsUpdate = true;
+}
+
+// ─── WEBXR SETUP ──────────────────────────────────────────────────────────────
+async function startAR() {
+  if (!navigator.xr) { alert('WebXR not supported.'); return; }
+  if (!backgroundAudio) { backgroundAudio = new Audio('forest.mp3'); backgroundAudio.loop=true; backgroundAudio.volume=0.4; }
+  backgroundAudio.play().catch(()=>{});
+  try {
+    const session = await navigator.xr.requestSession('immersive-ar',{ optionalFeatures:['dom-overlay'], domOverlay:{ root:document.body } });
+    document.getElementById('overlay').classList.add('webxr-hidden');
+    document.body.classList.add('xr-active');
+    renderer.xr.setReferenceSpaceType('local');
+    renderer.xr.setSession(session);
+    state.xrSession = session;
+
+    setupControllers();
+
+    // Build & attach the v1.3 white-glass clap HUD (head-locked to camera)
+    clapHUD = buildClapHUD();
+    camera.add(clapHUD);
+    scene.add(camera);
+
+    state.isControllerSelection = true;
+    state.gameStartTime = state.clock.getElapsedTime();
+    renderer.setAnimationLoop(render);
+    session.addEventListener('end', endAR);
+  } catch(e) { alert('Failed to start AR: '+e.message); }
+}
+
+function setupControllers() {
+  controllers = [renderer.xr.getController(0), renderer.xr.getController(1)];
+  controllers.forEach(c => {
+    scene.add(c);
+    const core = new THREE.Mesh(new THREE.SphereGeometry(0.015), new THREE.MeshBasicMaterial({ color:0xffffff }));
+    const glow = new THREE.Mesh(new THREE.SphereGeometry(0.03),  new THREE.MeshBasicMaterial({ color:0xffaadd, transparent:true, opacity:0.3, depthWrite:false }));
+    const wand = new THREE.Group(); wand.add(core,glow); c.add(wand);
+  });
+}
+
+// ─── NXT/Care v1.3 — Controller Select (Section 1) ───────────────────────────
+function processControllerSelection() {
+  if (!state.isControllerSelection) return;
+  const elapsed = (state.clock.getElapsedTime()-state.gameStartTime)*1000;
+
+  // Highest visible controller wins
+  let highY=-Infinity, highIdx=-1;
+  controllers.forEach((c,i)=>{ if (c.visible && c.position.y>highY) { highY=c.position.y; highIdx=i; }});
+
+  if (highIdx>=0) {
+    const c=controllers[highIdx];
+    const inFront = c.position.z>-0.8 && c.position.z<-0.3 && Math.abs(c.position.x)<0.3;
+    if (inFront) {
+      if (!state.ctrlHoldStart[highIdx]) state.ctrlHoldStart[highIdx]=state.clock.getElapsedTime();
+      if ((state.clock.getElapsedTime()-state.ctrlHoldStart[highIdx])*1000 >= CONSTANTS.holdTime) {
+        confirmController(highIdx); return;
+      }
+    } else { state.ctrlHoldStart[highIdx]=null; }
+  }
+  if (elapsed > CONSTANTS.selectTime) confirmController(Math.max(0,highIdx));
+}
+
+function confirmController(idx) {
+  state.isControllerSelection=false;
+  state.selectedCtrlIdx=idx;
+  state.activeController=controllers[idx];
+  triggerSelectionMagic(state.activeController);
+  butterfly     = new MagicalButterfly();
+  gardenSystem  = new GardenSystem();
+  state.isPlaying = true;
+}
+
+function triggerSelectionMagic(ctrl) {
+  const pos = new THREE.Vector3(); ctrl.getWorldPosition(pos);
+  particleSystem.burst(pos, 0xffaadd, 50, 2.5);
+}
+
+// ─── NXT/Care v1.3 — Clap-to-Close (Section 2) ───────────────────────────────
+function checkClap(controllers, exitImmersiveMode) {
+  if (controllers.length < 2) { clapStart = 0; return; }
+  const c1 = controllers[0], c2 = controllers[1];
+  // Failsafe: ignore controllers resting at origin (untracked)
+  if (c1.position.lengthSq() === 0 && c2.position.lengthSq() === 0) {
+    clapStart = 0; return;
+  }
+  if (c1.position.distanceTo(c2.position) <= CLAP_DIST) {
+    if (!clapStart) clapStart = Date.now();
+    else if (Date.now() - clapStart >= CLAP_TIME) {
+      exitImmersiveMode(); clapStart = 0;
+    }
+  } else {
+    clapStart = 0;
+  }
+}
+
+function endAR() {
+  if (state.xrSession) state.xrSession.end();
+  state.isPlaying=state.isControllerSelection=false;
+  document.body.classList.remove('xr-active');
+  document.getElementById('overlay').classList.remove('webxr-hidden');
+  if (backgroundAudio) { backgroundAudio.pause(); backgroundAudio.currentTime=0; }
+  renderer.setAnimationLoop(null); state.xrSession=null;
+  window.location.reload();
+}
+
+const _handPos = new THREE.Vector3();
+function render(time, frame) {
+  const delta = Math.min(state.clock.getDelta(), 0.1);
+  if (frame && state.xrSession) {
+    if (state.isControllerSelection) {
+      processControllerSelection();
+    } else {
+      // NXT/Care standard exit gesture — every frame
+      checkClap(controllers, endAR);
+
+      if (state.isPlaying && state.activeController) {
+        state.activeController.getWorldPosition(_handPos);
+        gardenSystem.checkHandCollisions(_handPos, butterfly);
+        gardenSystem.update(delta, _handPos);
+        butterfly.update(delta, _handPos);
+      }
+    }
+    particleSystem.update(delta, camera);
+
+    // Draw clap HUD every frame (visible only while clapStart > 0)
+    if (clapHUD) drawClapHUD(clapHUD);
+  }
+  renderer.render(scene, camera);
+}
+
+function onResize() {
+  camera.aspect = innerWidth/innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+}
+
+init();
+</script>
+</body>
+</html>
